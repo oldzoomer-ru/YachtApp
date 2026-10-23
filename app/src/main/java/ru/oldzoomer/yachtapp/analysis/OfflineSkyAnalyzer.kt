@@ -28,25 +28,20 @@ class OfflineSkyAnalyzer(private val context: Context) {
     private val labeler: ImageLabeler = ImageLabeling.getClient(labelerOptions)
 
     /**
-     * ML labels that are noise for weather forecasting — they indicate objects/elements
-     * on the boat or water surface rather than sky conditions. These should never trigger
-     * hazard warnings on their own.
+     * ML labels that are relevant for weather/sky analysis.
+     * We only consider these labels as valid signals.
      */
-    private val weatherNoiseLabels = setOf(
-        // Water-related (the camera is often pointed at water, not sky)
-        "water", "ocean", "sea", "wave", "river", "lake", "beach", "sand", "shore", "coast",
-        // Boat/ship related (objects on the water, not weather)
-        "boat", "ship", "yacht", "sailboat", "dock", "pier", "harbor", "port", "marina",
-        // Sky-adjacent but not weather indicators
-        "sky", "cloudless", "clear sky", "horizon", "sunrise", "sunset", "dawn", "dusk",
-        // Common false positives for darkness/storm detection
-        "darkness", "shadow", "shade", "silhouette", "reflection", "glare", "sparkle",
-        // Terrain/landscape noise
-        "mountain", "hill", "tree", "building", "bridge", "rock", "cliff", "island",
-        // Animal/life noise
-        "bird", "fish", "whale", "seagull", "dolphin",
-        // Object noise
-        "flag", "sail", "anchor", "rope", "net", "buoy", "life jacket", "vest"
+    private val validSkyLabels = setOf(
+        // Storm indicators
+        "storm", "thunder", "lightning", "cumulonimbus", "thunderhead",
+        "hurricane", "tornado", "typhoon", "cyclone",
+        // Cloud types & conditions
+        "cloud", "overcast", "cumulus", "stratus", "cirrus", "nimbus",
+        "fog", "mist", "haze", "smog", "drizzle", "cloudy",
+        // Clear/Fair weather
+        "sunny", "clear", "blue sky", "bright", "sunshine", "fair weather",
+        // Precipitation & Wind
+        "rain", "snow", "ice", "wind", "gust"
     )
 
     /**
@@ -167,8 +162,8 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 }
             }
 
-            // Format ML labels summary sorted by confidence, excluding noise
-            val filteredLabelsMap = detectedMlLabelsMap.filterKeys { it !in weatherNoiseLabels }
+            // Format ML labels summary sorted by confidence, keeping only valid sky labels
+            val filteredLabelsMap = detectedMlLabelsMap.filterKeys { it in validSkyLabels }
             val mlSummaryList = mutableListOf<String>()
             filteredLabelsMap.entries
                 .sortedByDescending { it.value }
