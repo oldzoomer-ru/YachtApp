@@ -6,67 +6,30 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import androidx.core.net.toUri
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.label.ImageLabel
-import com.google.mlkit.vision.label.ImageLabeler
-import com.google.mlkit.vision.label.ImageLabeling
-import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import ru.oldzoomer.yachtapp.data.Observation
 import ru.oldzoomer.yachtapp.data.ThreatLevel
 import ru.oldzoomer.yachtapp.data.WeatherAssessment
-import kotlin.coroutines.resume
 
 class OfflineSkyAnalyzer(private val context: Context) {
 
-    private val labelerOptions = ImageLabelerOptions.Builder()
-        .setConfidenceThreshold(0.35f)
-        .build()
-
-    private val labeler: ImageLabeler = ImageLabeling.getClient(labelerOptions)
+    private val weatherClassifier = WeatherClassifier(context)
 
     /**
-     * ML labels that are relevant for weather/sky analysis.
-     * We only consider these labels as valid signals.
+     * Weather labels that indicate storm conditions.
      */
-    private val validSkyLabels = setOf(
-        // Storm indicators
-        "storm", "thunder", "lightning", "cumulonimbus", "thunderhead",
-        "hurricane", "tornado", "typhoon", "cyclone",
-        // Cloud types & conditions
-        "cloud", "overcast", "cumulus", "stratus", "cirrus", "nimbus",
-        "fog", "mist", "haze", "smog", "drizzle", "cloudy",
-        // Clear/Fair weather
-        "sunny", "clear", "blue sky", "bright", "sunshine", "fair weather",
-        // Precipitation & Wind
-        "rain", "snow", "ice", "wind", "gust"
-    )
+    private val stormLabels = setOf("storm", "rainy")
 
     /**
-     * ML labels that strongly indicate storm conditions. These are weighted heavily
-     * but only trigger danger if corroborated by pixel analysis or multiple raunces.
+     * Weather labels that indicate cloud presence.
      */
-    private val stormIndicatorLabels = setOf(
-        "storm", "thunder", "lightning", "cumulonimbus", "thunderhead",
-        "hurricane", "tornado", "typhoon", "cyclone"
-    )
+    private val cloudLabels = setOf("cloudy", "overcast", "foggy", "hazy")
 
     /**
-     * ML labels that indicate cloud presence. Used for cloudiness estimation.
+     * Weather labels that indicate clear/fair weather.
      */
-    private val cloudLabels = setOf(
-        "cloud", "overcast", "cumulus", "stratus", "cirrus", "nimbus",
-        "fog", "mist", "haze", "smog", "drizzle"
-    )
-
-    /**
-     * Labels that indicate clear/fair weather when they dominate.
-     */
-    private val clearWeatherLabels = setOf(
-        "sunny", "clear", "blue sky", "bright", "sunshine", "fair weather"
-    )
+    private val clearLabels = setOf("sunny", "clear")
 
     suspend fun analyzeObservations(observations: List<Observation>): WeatherAssessment =
         withContext(Dispatchers.IO) {
@@ -94,10 +57,9 @@ class OfflineSkyAnalyzer(private val context: Context) {
             data class FrameAnalysis(
                 val darkRatio: Float,
                 val cloudinessRatio: Float,
-                val rawMlLabels: Map<String, Float>,
+                val weatherLabel: String?,
                 val stormSignal: Boolean,
                 val cloudSignal: Boolean,
-                val cumulonimbusSignal: Boolean,
                 val clearSignal: Boolean,
                 val skyCoverageEstimate: Int // 0-8 octas from this single frame
             )
@@ -107,21 +69,17 @@ class OfflineSkyAnalyzer(private val context: Context) {
             var totalDarkPixels = 0
             var totalSampledPixels = 0
 
-            // Global ML labels aggregated across all frames (confidence = max per label)
-            val detectedMlLabelsMap = mutableMapOf<String, Float>()
+            // Global weather labels aggregated across all frames
+            val detectedWeatherLabels = mutableMapOf<String, Int>()
 
             for (obs in observations) {
                 try {
                     val bitmap = loadDownsampledBitmapFromUri(obs.photoUri.toUri(), maxDimension = 800)
                     if (bitmap != null) {
-                        // 1. ML Kit Image Labeling (Offline On-Device ML)
-                        val mlLabels = processImageWithMlKit(bitmap)
-                        for (label in mlLabels) {
-                            val name = label.text
-                            val confidence = label.confidence
-                            if ((detectedMlLabelsMap[name] ?: 0f) < confidence) {
-                                detectedMlLabelsMap[name] = confidence
-                            }
+                        // 1. Custom Weather Model (TFLite)
+                        val weatherLabel = weatherClassifier.classify(bitmap)
+                        if (weatherLabel != null) {
+                            detectedWeatherLabels[weatherLabel] = detectedWeatherLabels.getOrDefault(weatherLabel, 0) + 1
                         }
 
                         // 2. Pixel luminance & cloud cover analysis per frame
@@ -132,12 +90,10 @@ class OfflineSkyAnalyzer(private val context: Context) {
                             maxCloudiness = bitmapAnalysis.cloudinessRatio
                         }
 
-                        // 3. Per-frame ML signal classification
-                        val frameLabels = mlLabels.associate { it.text to it.confidence }
-                        val frameStormSignal = classifyStormSignal(frameLabels)
-                        val frameCloudSignal = classifyCloudSignal(frameLabels)
-                        val frameCumulonimbusSignal = classifyCumulonimbusSignal(frameLabels)
-                        val frameClearSignal = classifyClearSignal(frameLabels)
+                        // 3. Per-frame signal classification
+                        val frameStormSignal = weatherLabel in stormLabels
+                        val frameCloudSignal = weatherLabel in cloudLabels
+                        val frameClearSignal = weatherLabel in clearLabels
 
                         // Estimate cloudiness octas from this single frame
                         val frameCloudOctas = (bitmapAnalysis.cloudinessRatio * 8).toInt().coerceIn(0, 8)
@@ -147,10 +103,9 @@ class OfflineSkyAnalyzer(private val context: Context) {
                         frameAnalyses.add(FrameAnalysis(
                             darkRatio = bitmapAnalysis.darkPixels.toFloat() / maxOf(bitmapAnalysis.totalPixels, 1),
                             cloudinessRatio = bitmapAnalysis.cloudinessRatio,
-                            rawMlLabels = frameLabels,
+                            weatherLabel = weatherLabel,
                             stormSignal = frameStormSignal,
                             cloudSignal = frameCloudSignal,
-                            cumulonimbusSignal = frameCumulonimbusSignal,
                             clearSignal = frameClearSignal,
                             skyCoverageEstimate = adjustedCloudOctas
                         ))
@@ -162,15 +117,11 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 }
             }
 
-            // Format ML labels summary sorted by confidence, keeping only valid sky labels
-            val filteredLabelsMap = detectedMlLabelsMap.filterKeys { it in validSkyLabels }
-            val mlSummaryList = mutableListOf<String>()
-            filteredLabelsMap.entries
+            // Format ML labels summary sorted by frequency
+            val mlSummaryList = detectedWeatherLabels.entries
                 .sortedByDescending { it.value }
                 .take(6)
-                .forEach { entry ->
-                    mlSummaryList.add("${entry.key} (${(entry.value * 100).toInt()}%)")
-                }
+                .map { "${it.key} (${it.value} ракурс)" }
 
             // ==========================================
             // CONSENSUS-BASED DECISION ENGINE
@@ -179,31 +130,26 @@ class OfflineSkyAnalyzer(private val context: Context) {
             // Count how many frames signal each condition
             val stormFrameCount = frameAnalyses.count { it.stormSignal }
             val cloudFrameCount = frameAnalyses.count { it.cloudSignal }
-            val cumulonimbusFrameCount = frameAnalyses.count { it.cumulonimbusSignal }
             val clearFrameCount = frameAnalyses.count { it.clearSignal }
             val totalFrames = maxOf(frameAnalyses.size, 1)
 
-            // Global consensus thresholds — require corroboration across multiple frames
+            // Global consensus thresholds
             val consensusStorm = stormFrameCount >= 2 || (stormFrameCount >= 1 && hasGusts)
             val consensusClouds = cloudFrameCount >= 2 || cloudFrameCount >= 1 && maxCloudiness > 0.5f
-            val consensusCumulonimbus = cumulonimbusFrameCount >= 2 ||
-                (cumulonimbusFrameCount >= 1 && frameAnalyses.any { it.darkRatio > 0.3f })
-
-            // Check if clear weather is dominant across frames
             val dominantClear = clearFrameCount >= totalFrames * 0.6f
 
-            // Average dark ratio across all frames (not just max)
+            // Average dark ratio across all frames
             val avgDarkRatio = if (frameAnalyses.isNotEmpty()) {
                 frameAnalyses.map { it.darkRatio }.average().toFloat()
             } else 0f
 
-            // Evaluate cloudiness in octas (0-8) — use max but cross-check with consensus
+            // Evaluate cloudiness in octas (0-8)
             var cloudinessOctas = (maxCloudiness * 8).toInt().coerceIn(0, 8)
             if (consensusClouds && cloudinessOctas < 3) {
-                cloudinessOctas = 4 // Consensus confirms clouds even if brightness is low
+                cloudinessOctas = 4
             }
             if (dominantClear && cloudinessOctas > 5) {
-                cloudinessOctas = maxOf(cloudinessOctas - 2, 0) // Clear labels reduce estimated cloudiness
+                cloudinessOctas = maxOf(cloudinessOctas - 2, 0)
             }
 
             val darkRatio = if (totalSampledPixels > 0) totalDarkPixels.toFloat() / totalSampledPixels else 0f
@@ -215,46 +161,46 @@ class OfflineSkyAnalyzer(private val context: Context) {
             var squallRisk = 10
             var dominantType = "Кучевые (Cu / Sc)"
 
-            // --- DANGER: Squall detection requires MULTIPLE corroborating signals ---
-            if ((darkRatio > 0.35f || avgDarkRatio > 0.25f || consensusCumulonimbus) && hasGusts && consensusStorm) {
+            // --- DANGER: Squall detection ---
+            if ((darkRatio > 0.35f || avgDarkRatio > 0.25f) && hasGusts && consensusStorm) {
                 threat = ThreatLevel.DANGER_SQUALL
                 squallRisk = 95
-                dominantType = "Кучево-дождевые (Cb) — подтверждено несколькими ракурсами"
+                dominantType = "Штормовые условия — подтверждено несколькими ракурсами"
                 hazards.add("ВЫСОКИЙ РИСК ШКВАЛА! Тёмные тучи + порывистый ветер + ML-подтверждение")
                 recommendations.add("СРОЧНО: Уберите стаксель, оставьте минимальный штормовой стаксель или грот")
                 recommendations.add("Наденьте страховочные пояса и жилеты, закрепитесь в кокпите")
-            } else if ((darkRatio > 0.45f || consensusCumulonimbus) && hasGusts) {
+            } else if ((darkRatio > 0.45f) && hasGusts) {
                 threat = ThreatLevel.DANGER_SQUALL
                 squallRisk = 90
-                dominantType = "Кучево-дождевые (Cb) — тёмные тучи со стороны фронта"
-                hazards.add("ВЫСОКИЙ РИСК ШКВАЛА! Тёмные тучи со стороны фронта + порывистый ветер")
+                dominantType = "Тёмные тучи со стороны фронта"
+                hazards.add("ВЫСОКИЙ РИСК ШКВАЛА! Тёмные тучи + порывистый ветер")
                 recommendations.add("СРОЧНО: Уберите стаксель, оставьте минимальный штормовой стаксель или грот")
                 recommendations.add("Наденьте страховочные пояса и жилеты, закрепитесь в кокпите")
             }
 
-            // --- WARNING: Single-source storm signal without gust confirmation ---
-            else if (consensusCumulonimbus) {
+            // --- WARNING: Storm signal ---
+            else if (consensusStorm) {
                 threat = ThreatLevel.WARNING
                 squallRisk = 65
-                dominantType = "Кучево-дождевые (Cb) / Плотная пелена"
-                hazards.add("ML-модель и датчики обнаружили тёмные грозовые тучи (Cb)")
+                dominantType = "Штормовые признаки"
+                hazards.add("ML-модель и датчики обнаружили штормовые условия")
                 recommendations.add("Уменьшите площадь парусности (взять рифы)")
                 recommendations.add("Убедитесь, что люки и лючки задраены")
             } else if (darkRatio > 0.35f && cloudinessOctas >= 6) {
                 threat = ThreatLevel.WARNING
                 squallRisk = 60
-                dominantType = "Плотная пелена / Слоисто-дождевые (Ns)"
+                dominantType = "Плотная пелена"
                 hazards.add("Тёмные тучи занимают более 7/8 неба, давление падает")
                 recommendations.add("Уменьшите площадь парусности (взять рифы)")
                 recommendations.add("Проверьте страховку и подготовьте штормовой комплект")
             }
 
             // --- CAUTION: Moderate risk signals ---
-            else if (consensusStorm) {
+            else if (consensusClouds) {
                 threat = ThreatLevel.WARNING
                 squallRisk = 70
-                dominantType = "Накопление кучевых облаков"
-                hazards.add("ML-модель идентифицировала штормовые признаки в нескольких ракурсах")
+                dominantType = "Накопление облаков"
+                hazards.add("ML-модель идентифицировала облачные условия в нескольких ракурсах")
                 recommendations.add("Подготовьте штормовой комплект и закрепите страховки")
             } else if ((hasGusts || avgWind > 20) && cloudinessOctas >= 4) {
                 threat = ThreatLevel.CAUTION
@@ -300,85 +246,6 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 recommendations = recommendations,
                 mlDetectedLabels = mlSummaryList
             )
-        }
-
-    /**
-     * Check if ML labels in a single frame indicate storm conditions.
-     * Requires either high-confidence storm labels OR combination of multiple weak signals.
-     */
-    private fun classifyStormSignal(frameLabels: Map<String, Float>): Boolean {
-        val stormLabels = frameLabels.filterKeys { it.lowercase() in stormIndicatorLabels }
-            .filterValues { it > 0.5f } // Only high-confidence
-
-        if (stormLabels.isNotEmpty()) return true
-
-        // Weak signal combination: multiple cloud-related + darkness
-        val darkOrStormy = frameLabels.filterKeys {
-            it.lowercase().contains("dark") || it.lowercase().contains("storm")
-        }.any { it.value > 0.4f }
-
-        val heavyCloud = frameLabels.filterKeys {
-            it.lowercase() in setOf("overcast", "nimbus", "cumulus")
-        }.filterValues { it > 0.5f }
-
-        return darkOrStormy && heavyCloud.size >= 2
-    }
-
-    /**
-     * Check if ML labels indicate cloud presence in a single frame.
-     */
-    private fun classifyCloudSignal(frameLabels: Map<String, Float>): Boolean {
-        val cloudLabels = frameLabels.filterKeys { it.lowercase() in cloudLabels }
-            .filterValues { it > 0.4f }
-        return cloudLabels.isNotEmpty()
-    }
-
-    /**
-     * Check if ML labels specifically indicate cumulonimbus (thunderstorm) clouds.
-     */
-    private fun classifyCumulonimbusSignal(frameLabels: Map<String, Float>): Boolean {
-        val cbLabels = frameLabels.filterKeys {
-            it.lowercase().contains("cumulonimbus") ||
-            it.lowercase().contains("thunderhead") ||
-            it.lowercase().contains("storm cloud")
-        }.filterValues { it > 0.5f }
-
-        // Also check for "darkness" but only with supporting cloud evidence
-        val hasDarkness = frameLabels.filterKeys {
-            it.lowercase() in setOf("darkness", "dark", "gloomy")
-        }.any { it.value > 0.5f }
-
-        if (cbLabels.isNotEmpty()) return true
-        if (hasDarkness && classifyCloudSignal(frameLabels)) return true
-
-        return false
-    }
-
-    /**
-     * Check if ML labels indicate clear/fair weather.
-     */
-    private fun classifyClearSignal(frameLabels: Map<String, Float>): Boolean {
-        val clearLabels = frameLabels.filterKeys { it.lowercase() in clearWeatherLabels }
-            .filterValues { it > 0.45f }
-        return clearLabels.isNotEmpty()
-    }
-
-    private suspend fun processImageWithMlKit(bitmap: Bitmap): List<ImageLabel> =
-        suspendCancellableCoroutine { continuation ->
-            try {
-                val inputImage = InputImage.fromBitmap(bitmap, 0)
-                labeler.process(inputImage)
-                    .addOnSuccessListener { labels ->
-                        continuation.resume(labels)
-                    }
-                    .addOnFailureListener { e ->
-                        Log.w("OfflineSkyAnalyzer", "ML Kit processing failed", e)
-                        continuation.resume(emptyList())
-                    }
-            } catch (e: Exception) {
-                Log.e("OfflineSkyAnalyzer", "Error creating InputImage for ML Kit", e)
-                continuation.resume(emptyList())
-            }
         }
 
     private data class BitmapAnalysis(
