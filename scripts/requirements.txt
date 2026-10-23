@@ -1,0 +1,30 @@
+# Индексы пакетов (PyPI и стабильный репозиторий PyTorch CUDA 12)
+--extra-index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://pypi.org/simple
+
+# Deep Learning (Синхронизированные версии PyTorch)
+torch>=2.4.0
+torchvision>=0.19.0
+
+# Hugging Face ecosystem
+transformers>=4.40.0
+datasets>=2.19.0
+accelerate>=0.30.0
+timm>=1.0.0
+
+# ONNX & TFLite Conversion
+onnx>=1.16.0
+onnxscript
+onnx_graphsurgeon
+ai_edge_litert
+sng4onnx
+onnx2tf>=1.22.0
+
+# TensorFlow и Keras (стабильная совместимая связка)
+tensorflow>=2.16.0
+tf-keras>=2.16.0
+
+# Utilities & Critical Constraints
+numpy>=1.24.3
+Pillow>=9.5.0
+matplotlib>=3.7.0
