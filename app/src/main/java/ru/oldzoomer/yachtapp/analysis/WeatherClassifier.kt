@@ -2,18 +2,18 @@ package ru.oldzoomer.yachtapp.analysis
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.ai.edge.litert.support.common.FileUtil
+import com.google.ai.edge.litert.Accelerator
+import com.google.ai.edge.litert.CompiledModel
 import com.google.ai.edge.litert.support.common.ops.NormalizeOp
 import com.google.ai.edge.litert.support.image.ImageProcessor
 import com.google.ai.edge.litert.support.image.TensorImage
 import com.google.ai.edge.litert.support.image.ops.ResizeOp
-import org.tensorflow.lite.Interpreter
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class WeatherClassifier(private val context: Context) {
 
-    private var interpreter: Interpreter? = null
+    private var model: CompiledModel? = null
     private val labelList = listOf(
         "sunny", "cloudy", "rainy", "foggy",
         "storm", "clear", "snowy", "overcast",
@@ -26,22 +26,32 @@ class WeatherClassifier(private val context: Context) {
 
     private fun loadModel() {
         try {
-            val modelBuffer = FileUtil.loadMappedFile(context, "weather_model.tflite")
-            val options = Interpreter.Options().apply {
-                setNumThreads(4)
-            }
-            interpreter = Interpreter(modelBuffer, options)
+            model = CompiledModel.create(
+                context.assets,
+                "weather_model.tflite",
+                CompiledModel.Options(
+                    Accelerator.GPU,
+                    Accelerator.CPU
+                )
+            )
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     fun classify(bitmap: Bitmap): String? {
-        val input = preprocess(bitmap) ?: return null
-        val output = Array(1) { FloatArray(labelList.size) }
-        interpreter?.run(input, output)
+        val input = model?.createInputBuffers()
+        val output = model?.createOutputBuffers()
 
-        val maxIndex = output[0].indices.maxByOrNull { output[0][it] } ?: return null
+        preprocess(bitmap)?.array()?.let { input?.get(0)?.writeInt8(it) }
+
+        if (input != null && output != null) {
+            model?.run(input, output)
+        }
+
+        val maxIndex = output?.get(0)?.readFloat()?.indices?.maxByOrNull {
+            output[0].readFloat()[it]
+        } ?: return null
         return labelList[maxIndex]
     }
 
@@ -58,6 +68,6 @@ class WeatherClassifier(private val context: Context) {
     }
 
     fun close() {
-        interpreter?.close()
+        model?.close()
     }
 }

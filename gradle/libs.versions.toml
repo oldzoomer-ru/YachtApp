@@ -68,6 +68,7 @@ androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycl
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraView" }
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "cameraCore" }
 tensorflow-lite = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
+tensorflow-lite-gpu = { module = "com.google.ai.edge.litert:litert-gpu", version.ref = "litert" }
 tensorflow-lite-support = { module = "com.google.ai.edge.litert:litert-support", version.ref = "litert" }
 
 [plugins]

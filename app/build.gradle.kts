@@ -65,6 +65,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.core)
     implementation(libs.play.services.location)
     implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.gpu)
     implementation(libs.tensorflow.lite.support)
     testImplementation(libs.androidx.core)
     testImplementation(libs.androidx.junit)
