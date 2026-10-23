@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "ru.oldzoomer.yachtapp"
     compileSdk {
-        version = release(37)
+        version = release(37) {
+            minorApiLevel = 1
+        }
     }
 
     defaultConfig {
@@ -36,6 +38,7 @@ android {
     buildFeatures {
         compose = true
     }
+    buildToolsVersion = "37.0.0"
 }
 
 dependencies {
