@@ -2,6 +2,7 @@ package ru.oldzoomer.yachtapp.ui.capture
 
 import android.net.Uri
 import ru.oldzoomer.yachtapp.data.Direction
+import ru.oldzoomer.yachtapp.data.DirectionMode
 import ru.oldzoomer.yachtapp.data.WeatherAssessment
 
 data class CapturedObservation(
@@ -16,6 +17,7 @@ sealed interface CaptureUiState {
         val photoIndex: Int, // 1 to 5
         val totalPhotos: Int = 5,
         val direction: Direction,
+        val directionMode: DirectionMode = DirectionMode.DIAGONAL,
         val currentAzimuth: Float = 0f,
         val pressureHpa: Float = 1013.25f,
         val hasPressure: Boolean = false

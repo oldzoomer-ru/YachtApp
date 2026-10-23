@@ -16,10 +16,15 @@ class FakeSkyAnalyzerTest {
 
     @Test
     fun directionEnum_hasCorrectAnglesAndNames() {
-        val sequence = Direction.sequenceForCapture()
-        assertEquals(5, sequence.size)
-        assertEquals(Direction.WINDWARD, sequence[0])
-        assertEquals(Direction.NORTH, sequence[4])
+        val sequenceDiagonal = Direction.sequenceForCapture()
+        assertEquals(5, sequenceDiagonal.size)
+        assertEquals(Direction.CLOSE_HAULED_STBD, sequenceDiagonal[0])
+        assertEquals(Direction.TRUE_WINDWARD, sequenceDiagonal[4])
+
+        val sequenceOrthogonal = Direction.sequenceForMode(ru.oldzoomer.yachtapp.data.DirectionMode.ORTHOGONAL)
+        assertEquals(5, sequenceOrthogonal.size)
+        assertEquals(Direction.BOW_WINDWARD, sequenceOrthogonal[0])
+        assertEquals(Direction.TRUE_WINDWARD, sequenceOrthogonal[4])
     }
 
     @Test

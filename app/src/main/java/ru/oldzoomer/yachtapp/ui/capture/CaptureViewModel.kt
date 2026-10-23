@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import ru.oldzoomer.yachtapp.analysis.OfflineSkyAnalyzer
 import ru.oldzoomer.yachtapp.camera.CameraManager
 import ru.oldzoomer.yachtapp.data.Direction
+import ru.oldzoomer.yachtapp.data.DirectionMode
 import ru.oldzoomer.yachtapp.data.Observation
 import ru.oldzoomer.yachtapp.data.WeatherRepository
 import ru.oldzoomer.yachtapp.location.LocationProvider
@@ -31,13 +32,10 @@ class CaptureViewModel(
     private val _uiState = MutableStateFlow<CaptureUiState>(CaptureUiState.Idle)
     val uiState: StateFlow<CaptureUiState> = _uiState.asStateFlow()
 
-    private val captureSequence = listOf(
-        Direction.WINDWARD,
-        Direction.STARBOARD,
-        Direction.LEEWARD,
-        Direction.PORT,
-        Direction.NORTH
-    )
+    private var selectedDirectionMode = DirectionMode.DIAGONAL
+
+    private val captureSequence: List<Direction>
+        get() = Direction.sequenceForMode(selectedDirectionMode)
 
     private val capturedList = mutableListOf<CapturedObservation>()
     private var currentIndex = 0
@@ -67,14 +65,22 @@ class CaptureViewModel(
         }
     }
 
+    fun setDirectionMode(mode: DirectionMode) {
+        selectedDirectionMode = mode
+    }
+
+    fun getDirectionMode(): DirectionMode = selectedDirectionMode
+
     fun startNewObservation() {
         capturedList.clear()
         currentIndex = 0
+        val sequence = captureSequence
         viewModelScope.launch {
             _uiState.value = CaptureUiState.Capturing(
                 photoIndex = 1,
-                totalPhotos = captureSequence.size,
-                direction = captureSequence[0],
+                totalPhotos = sequence.size,
+                direction = sequence[0],
+                directionMode = selectedDirectionMode,
                 currentAzimuth = currentAzimuth,
                 pressureHpa = currentPressure,
                 hasPressure = hasPressure
@@ -92,12 +98,13 @@ class CaptureViewModel(
                     cameraManager.takePhoto().first().getOrThrow()
                 }
 
-                val currentDirection = captureSequence[currentIndex]
+                val sequence = captureSequence
+                val currentDirection = sequence[currentIndex]
                 capturedList.add(CapturedObservation(currentDirection, photoUri))
 
                 currentIndex++
-                if (currentIndex < captureSequence.size) {
-                    val nextDir = captureSequence[currentIndex]
+                if (currentIndex < sequence.size) {
+                    val nextDir = sequence[currentIndex]
                     _uiState.value = CaptureUiState.ReadyForNext(
                         capturedObservations = capturedList.toList(),
                         nextDirection = nextDir,
@@ -120,11 +127,13 @@ class CaptureViewModel(
     }
 
     fun continueToNextCapture() {
-        if (currentIndex < captureSequence.size) {
+        val sequence = captureSequence
+        if (currentIndex < sequence.size) {
             _uiState.value = CaptureUiState.Capturing(
                 photoIndex = currentIndex + 1,
-                totalPhotos = captureSequence.size,
-                direction = captureSequence[currentIndex],
+                totalPhotos = sequence.size,
+                direction = sequence[currentIndex],
+                directionMode = selectedDirectionMode,
                 currentAzimuth = currentAzimuth,
                 pressureHpa = currentPressure,
                 hasPressure = hasPressure

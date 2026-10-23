@@ -2,21 +2,66 @@ package ru.oldzoomer.yachtapp.data
 
 import androidx.room.TypeConverter
 
-enum class Direction(val displayName: String, val angleOffset: Float) {
-    WINDWARD("Левентик (В лицо)", 0f),
-    STARBOARD("Правый борт", 90f),
-    LEEWARD("В корму", 180f),
-    PORT("Левый борт", 270f),
-    NORTH("Север", 0f); // Absolute north reference if needed
+enum class DirectionMode(
+    val title: String,
+    val description: String,
+) {
+    DIAGONAL(
+        title = "Наискосок (без мачты)",
+        description = "Бейдвинд / бакштаг — мачта и ванты не закрывают ракурс"
+    ),
+    ORTHOGONAL(
+        title = "По осям судна",
+        description = "Левентик / галфвинд / фордевинд — по бортам, носу и корме"
+    )
+}
+
+enum class Direction(
+    val displayName: String,
+    val nauticalTerm: String,
+    val angleOffset: Float
+) {
+    // --- Вариант 1: Наискосок (Диагональная схема - 45°, 135°, 225°, 315°) ---
+    CLOSE_HAULED_STBD("Бейдвинд пр. галса", "Нос 45° справа", 45f),
+    BROAD_REACH_STBD("Бакштаг пр. галса", "Корма 135° справа", 135f),
+    BROAD_REACH_PORT("Бакштаг лев. галса", "Корма 225° слева", 225f),
+    CLOSE_HAULED_PORT("Бейдвинд лев. галса", "Нос 315° слева", 315f),
+
+    // --- Вариант 2: По осям судна (Ортогональная схема - 0°, 90°, 180°, 270°) ---
+    BOW_WINDWARD("Левентик судна", "Нос судна (0°)", 0f),
+    BEAM_STARBOARD("Галфвинд пр. галса", "Правый борт (90°)", 90f),
+    STERN_LEEWARD("Фордевинд", "Корма судна (180°)", 180f),
+    BEAM_PORT("Галфвинд лев. галса", "Левый борт (270°)", 270f),
+
+    // --- 5-й ракурс: Реальный ветер ---
+    TRUE_WINDWARD("Реальный левентик", "Ветер в лицо", 0f),
+
+    // --- Совместимость со старыми записями БД ---
+    WINDWARD("Левентик (В лицо)", "0°", 0f),
+    STARBOARD("Правый борт", "90°", 90f),
+    LEEWARD("В корму", "180°", 180f),
+    PORT("Левый борт", "270°", 270f),
+    NORTH("Север", "0°", 0f);
 
     companion object {
-        fun sequenceForCapture(): List<Direction> = listOf(
-            WINDWARD,
-            STARBOARD,
-            LEEWARD,
-            PORT,
-            NORTH
-        )
+        fun sequenceForMode(mode: DirectionMode): List<Direction> = when (mode) {
+            DirectionMode.DIAGONAL -> listOf(
+                CLOSE_HAULED_STBD,
+                BROAD_REACH_STBD,
+                BROAD_REACH_PORT,
+                CLOSE_HAULED_PORT,
+                TRUE_WINDWARD
+            )
+            DirectionMode.ORTHOGONAL -> listOf(
+                BOW_WINDWARD,
+                BEAM_STARBOARD,
+                STERN_LEEWARD,
+                BEAM_PORT,
+                TRUE_WINDWARD
+            )
+        }
+
+        fun sequenceForCapture(): List<Direction> = sequenceForMode(DirectionMode.DIAGONAL)
     }
 }
 
@@ -31,7 +76,7 @@ class DirectionConverter {
         return try {
             Direction.valueOf(value)
         } catch (_: Exception) {
-            Direction.WINDWARD
+            Direction.TRUE_WINDWARD
         }
     }
 }
