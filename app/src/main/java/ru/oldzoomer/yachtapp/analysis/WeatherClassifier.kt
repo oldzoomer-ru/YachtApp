@@ -19,10 +19,14 @@ class WeatherClassifier(private val context: Context) {
 
     private var model: CompiledModel? = null
 
+    // Must match WEATHER_LABELS from train_weather_model.py:
+    // ["cloudy_overcast", "foggy_hazy", "rain_storm", "snow_frosty", "sun_clear"]
     private val labelList = listOf(
-        "sunny", "cloudy", "rainy", "foggy",
-        "storm", "clear", "snowy", "overcast",
-        "hazy", "night"
+        "cloudy_overcast",
+        "foggy_hazy",
+        "rain_storm",
+        "snow_frosty",
+        "sun_clear"
     )
 
     // Reused image processor instance
@@ -100,12 +104,4 @@ class WeatherClassifier(private val context: Context) {
         }
     }
 
-    fun close() {
-        try {
-            model?.close()
-            model = null
-        } catch (e: Exception) {
-            Log.e("WeatherClassifier", "Error closing model", e)
-        }
-    }
 }

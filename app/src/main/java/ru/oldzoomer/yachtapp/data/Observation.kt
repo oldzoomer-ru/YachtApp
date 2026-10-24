@@ -12,7 +12,8 @@ data class Observation(
     val longitude: Double,
     val photoUri: String,
     val direction: Direction,
-    val pressureHpa: Float = 1013.25f,
+    val pressureHpa: Float = 0f,
+    val hasPressureSensor: Boolean = false,
     val userWindKnots: Int = 10,
     val userIsGusty: Boolean = false
 )

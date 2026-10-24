@@ -431,12 +431,11 @@ fun CapturingView(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        if (hasPressure) {
-                            Text(
-                                text = "P: ${pressureHpa.toInt()} hPa",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
+                        Text(
+                            text = if (hasPressure) "P: ${pressureHpa.toInt()} hPa" else "P: Датчик не обнаружен",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (hasPressure) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -933,7 +932,26 @@ fun ForecastResultView(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Облачность: ${assessment.cloudinessOctas}/8 (${assessment.dominantCloudType})")
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Давление: ${assessment.pressureHpa.toInt()} hPa (${assessment.pressureTrend})")
+                    Text("Давление: ${if (assessment.pressureHpa > 0) "${assessment.pressureHpa.toInt()} hPa" else "Датчик не обнаружен"} (${assessment.pressureTrend})")
+                    
+                    // Display forecast confidence
+                    val confidenceText = when {
+                        assessment.forecastConfidence >= 0.8f -> "Высокая достоверность"
+                        assessment.forecastConfidence >= 0.5f -> "Средняя достоверность"
+                        assessment.forecastConfidence > 0f -> "Низкая достоверность"
+                        else -> "Без данных"
+                    }
+                    val confidenceColor = when {
+                        assessment.forecastConfidence >= 0.8f -> Color(0xFF4CAF50)
+                        assessment.forecastConfidence >= 0.5f -> Color(0xFFFFC107)
+                        assessment.forecastConfidence > 0f -> Color(0xFFFF5722)
+                        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    }
+                    Text(
+                        text = "Достоверность прогноза: $confidenceText (${"%.0f".format(assessment.forecastConfidence * 100)}%)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = confidenceColor
+                    )
 
                     if (assessment.mlDetectedLabels.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(12.dp))

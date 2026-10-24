@@ -45,7 +45,7 @@ class CaptureViewModel(
     private val capturedList = mutableListOf<CapturedObservation>()
     private var currentIndex = 0
     private var currentAzimuth = 0f
-    private var currentPressure = 1013.25f
+    private var currentPressure = 0f
     private var hasPressure = false
 
     private var userWindKnots = 12
@@ -173,7 +173,8 @@ class CaptureViewModel(
                         longitude = lon,
                         photoUri = it.photoUri.toString(),
                         direction = it.direction,
-                        pressureHpa = currentPressure,
+                        pressureHpa = if (hasPressure) currentPressure else 0f,
+                        hasPressureSensor = hasPressure,
                         userWindKnots = userWindKnots,
                         userIsGusty = userIsGusty
                     )

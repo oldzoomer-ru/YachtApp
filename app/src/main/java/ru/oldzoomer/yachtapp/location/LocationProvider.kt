@@ -7,15 +7,12 @@ import android.util.Log
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
-class LocationProvider(private val context: Context) {
+class LocationProvider(context: Context) {
     private val fusedLocationClient: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)
 
@@ -43,13 +40,4 @@ class LocationProvider(private val context: Context) {
         }
     }
 
-    fun getCurrentTimestamp(): Long = System.currentTimeMillis()
-
-    @SuppressLint("MissingPermission")
-    fun getLocationFlow(): Flow<Location?> = flow {
-        while (true) {
-            emit(getCurrentLocation())
-            kotlinx.coroutines.delay(10.seconds)
-        }
-    }
 }

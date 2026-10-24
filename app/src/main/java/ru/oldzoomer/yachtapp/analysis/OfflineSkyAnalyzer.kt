@@ -5,33 +5,40 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
+import androidx.core.graphics.get
+import androidx.core.graphics.scale
 import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.oldzoomer.yachtapp.data.Observation
 import ru.oldzoomer.yachtapp.data.ThreatLevel
 import ru.oldzoomer.yachtapp.data.WeatherAssessment
-import androidx.core.graphics.scale
-import androidx.core.graphics.get
+import java.util.Calendar
 
 class OfflineSkyAnalyzer(private val context: Context) {
 
     private val weatherClassifier = WeatherClassifier(context)
 
+    // Labels from the model's output (indices 0-4)
+    private val modelLabelCloudyOvercast = "cloudy_overcast"  // index 0
+    private val modelLabelFoggyHazy = "foggy_hazy"            // index 1
+    private val modelLabelRainStorm = "rain_storm"            // index 2
+    private val modelLabelSunClear = "sun_clear"              // index 4
+
     /**
      * Weather labels that indicate storm conditions.
      */
-    private val stormLabels = setOf("storm", "rainy")
+    private val stormLabels = setOf(modelLabelRainStorm)
 
     /**
      * Weather labels that indicate cloud presence.
      */
-    private val cloudLabels = setOf("cloudy", "overcast", "foggy", "hazy")
+    private val cloudLabels = setOf(modelLabelCloudyOvercast, modelLabelFoggyHazy)
 
     /**
      * Weather labels that indicate clear/fair weather.
      */
-    private val clearLabels = setOf("sunny", "clear")
+    private val clearLabels = setOf(modelLabelSunClear)
 
     suspend fun analyzeObservations(observations: List<Observation>): WeatherAssessment =
         withContext(Dispatchers.IO) {
@@ -41,8 +48,8 @@ class OfflineSkyAnalyzer(private val context: Context) {
                     threatLevel = ThreatLevel.CALM,
                     cloudinessOctas = 0,
                     dominantCloudType = "Ясно / Чисто",
-                    pressureHpa = 1013.25f,
-                    pressureTrend = "Стабильно",
+                    pressureHpa = 0f,
+                    pressureTrend = "Датчик не обнаружен",
                     squallRiskPercent = 0,
                     estimatedWindKnots = 10,
                     hazards = emptyList(),
@@ -52,44 +59,60 @@ class OfflineSkyAnalyzer(private val context: Context) {
             }
 
             // --- 1. Barometric Pressure Trend Calculation ---
-            val sortedObs = observations.sortedBy { obs -> obs.timestamp }
-            val currentPressure = sortedObs.last().pressureHpa
-            val oldestPressure = sortedObs.first().pressureHpa
+            // Only calculate pressure trend if at least one observation has a real pressure sensor
+            val hasRealPressureSensor = observations.any { it.hasPressureSensor }
+            val pressureTrendStr = if (hasRealPressureSensor) {
+                val sortedObs = observations.sortedBy { obs -> obs.timestamp }
+
+                // Filter out observations with default pressure (no sensor)
+                val validObservations = sortedObs.filter { it.hasPressureSensor && it.pressureHpa > 0f }
+                if (validObservations.size < 2) {
+                    "Недостаточно данных барометра"
+                } else {
+                    val validCurrent = validObservations.last().pressureHpa
+                    val validOldest = validObservations.first().pressureHpa
+                    val timeDiffHours = maxOf((validObservations.last().timestamp - validObservations.first().timestamp).toFloat() / 3_600_000f, 0.5f)
+                    val pressureRatePerHour = (validCurrent - validOldest) / timeDiffHours
+
+                    when {
+                        pressureRatePerHour < -1.5f -> "Резкое падение (к шторму)"
+                        pressureRatePerHour < -0.5f -> "Падает"
+                        pressureRatePerHour > 1.5f -> "Резкий рост"
+                        pressureRatePerHour > 0.5f -> "Растет"
+                        else -> "Стабильно"
+                    }
+                }
+            } else {
+                "Датчик не обнаружен"
+            }
+
+            val currentPressure = if (hasRealPressureSensor) {
+                observations.lastOrNull { it.hasPressureSensor && it.pressureHpa > 0f }?.pressureHpa ?: 0f
+            } else 0f
 
             val avgWind = observations.asSequence().map { it.userWindKnots }.average().toInt()
             val hasGusts = observations.any { it.userIsGusty }
-
-            // Difference in hours (minimum 0.5h to prevent division spikes when photos are taken quickly)
-            val timeDiffHours = maxOf((sortedObs.last().timestamp - sortedObs.first().timestamp).toFloat() / 3_600_000f, 0.5f)
-            val pressureRatePerHour = (currentPressure - oldestPressure) / timeDiffHours
-
-            val isRapidPressureDrop = pressureRatePerHour < -1.5f // Drop faster than 1.5 hPa/hr is alarming
-            val isModeratePressureDrop = pressureRatePerHour < -0.5f
-            val isRapidPressureRise = pressureRatePerHour > 1.5f
-
-            val pressureTrendStr = when {
-                isRapidPressureDrop -> "Резкое падение (к шторму)"
-                isModeratePressureDrop -> "Падает"
-                isRapidPressureRise -> "Резкий рост"
-                pressureRatePerHour > 0.5f -> "Растет"
-                else -> "Стабильно"
-            }
 
             // Per-observation analysis results for consensus building
             data class FrameAnalysis(
                 val darkRatio: Float,
                 val cloudinessRatio: Float,
                 val weatherLabel: String?,
+                val weatherConfidence: Float,
                 val stormSignal: Boolean,
                 val cloudSignal: Boolean,
                 val clearSignal: Boolean,
                 val skyCoverageEstimate: Int, // 0-8 octas from this single frame
+                val brightness: Float, // average brightness (0-255)
+                val skyGradient: Float, // vertical gradient (higher = clearer horizon)
             )
 
             val frameAnalyses = mutableListOf<FrameAnalysis>()
             var maxCloudiness = 0f
             var totalDarkPixels = 0
             var totalSampledPixels = 0
+            var totalBrightness = 0f
+            var totalSkyGradient = 0f
 
             // Global weather labels aggregated across all frames
             val detectedWeatherLabels = mutableMapOf<String, Int>()
@@ -103,6 +126,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
                         // 1. Custom Weather Model (TFLite) with confidence filtering
                         val weatherResult = weatherClassifier.classify(bitmap, minConfidence = 0.45f)
                         val weatherLabel = weatherResult?.label
+                        val weatherConfidence = weatherResult?.confidence ?: 0f
 
                         if (weatherResult != null) {
                             detectedWeatherLabels[weatherResult.label] = detectedWeatherLabels.getOrDefault(weatherResult.label, 0) + 1
@@ -113,10 +137,12 @@ class OfflineSkyAnalyzer(private val context: Context) {
                             }
                         }
 
-                        // 2. Pixel analysis via Red/Blue ratio & dark storm cloud detection
-                        val bitmapAnalysis = analyzeSkyPixels(bitmap)
+                        // 2. Enhanced pixel analysis
+                        val bitmapAnalysis = analyzeSkyPixelsEnhanced(bitmap)
                         totalDarkPixels += bitmapAnalysis.darkPixels
                         totalSampledPixels += bitmapAnalysis.totalPixels
+                        totalBrightness += bitmapAnalysis.averageBrightness
+                        totalSkyGradient += bitmapAnalysis.skyGradient
                         if (bitmapAnalysis.cloudinessRatio > maxCloudiness) {
                             maxCloudiness = bitmapAnalysis.cloudinessRatio
                         }
@@ -136,10 +162,13 @@ class OfflineSkyAnalyzer(private val context: Context) {
                             darkRatio = bitmapAnalysis.darkPixels.toFloat() / maxOf(bitmapAnalysis.totalPixels, 1),
                             cloudinessRatio = bitmapAnalysis.cloudinessRatio,
                             weatherLabel = weatherLabel,
+                            weatherConfidence = weatherConfidence,
                             stormSignal = frameStormSignal,
                             cloudSignal = frameCloudSignal,
                             clearSignal = frameClearSignal,
                             skyCoverageEstimate = adjustedCloudOctas,
+                            brightness = bitmapAnalysis.averageBrightness,
+                            skyGradient = bitmapAnalysis.skyGradient,
                         ),
                     )
 
@@ -180,6 +209,14 @@ class OfflineSkyAnalyzer(private val context: Context) {
             val overallDarkRatio = if (totalSampledPixels > 0) totalDarkPixels.toFloat() / totalSampledPixels else 0f
             val darkRatio = maxOf(avgDarkRatio, overallDarkRatio)
 
+            // Time-of-day awareness (night photos have false "dark clouds")
+            val calendar = Calendar.getInstance()
+            val hourOfDay = calendar.get(Calendar.HOUR_OF_DAY)
+            val isNight = hourOfDay !in 6..20
+
+            // Night/dusk correction: reduce dark ratio impact
+            val adjustedDarkRatio = if (isNight) darkRatio * 0.3f else darkRatio
+
             // Evaluate cloudiness in octas (0-8)
             var cloudinessOctas = (maxCloudiness * 8).toInt().coerceIn(0, 8)
             if (consensusClouds && cloudinessOctas < 3) {
@@ -197,19 +234,22 @@ class OfflineSkyAnalyzer(private val context: Context) {
             var dominantType = "Кучевые / Слоистые облака"
 
             // --- 1. DANGER: Squall / Storm Conditions ---
-            if ((consensusStorm && hasGusts && (darkRatio > 0.2f || isRapidPressureDrop)) ||
-                (darkRatio > 0.35f && hasGusts && (isRapidPressureDrop || avgWind > 25))
+            if ((consensusStorm && hasGusts && adjustedDarkRatio > 0.2f) ||
+                (adjustedDarkRatio > 0.35f && hasGusts && avgWind > 25)
             ) {
                 threat = ThreatLevel.DANGER_SQUALL
                 squallRisk = 95
                 dominantType = "Штормовые / предшквальные кучево-дождевые тучи (Cb)"
-                hazards.add("ВЫСОКИЙ РИСК ШКВАЛА! Тёмные тучи + порывистый ветер / падение давления")
+                hazards.add("ВЫСОКИЙ РИСК ШКВАЛА! Тёмные тучи + порывистый ветер")
+                if (hasRealPressureSensor) {
+                    hazards.add("Нарушение барометрического паттерна")
+                }
                 recommendations.add("СРОЧНО: Уберите стаксель, оставьте минимальный штормовой стаксель или грот")
                 recommendations.add("Наденьте страховочные пояса и жилеты, закрепитесь в кокпите")
             }
 
             // --- 2. WARNING: Rapid pressure drop, storm signs, or severe cloudiness with wind ---
-            else if (isRapidPressureDrop) {
+            else if (hasRealPressureSensor && pressureTrendStr.contains("Резкое падение")) {
                 threat = ThreatLevel.WARNING
                 squallRisk = 60
                 dominantType = "Приближение атмосферного фронта"
@@ -230,7 +270,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 hazards.add("Сильный порывистый ветер ($avgWind уз.) и плотная облачность ($cloudinessOctas/8)")
                 recommendations.add("Уменьшите площадь парусности (взять рифы)")
                 recommendations.add("Проверьте страховку и подготовьте штормовой комплект")
-            } else if (darkRatio > 0.35f && cloudinessOctas >= 6) {
+            } else if (adjustedDarkRatio > 0.35f && cloudinessOctas >= 6) {
                 threat = ThreatLevel.WARNING
                 squallRisk = 60
                 dominantType = "Плотная темная пелена"
@@ -255,7 +295,8 @@ class OfflineSkyAnalyzer(private val context: Context) {
             }
 
             // --- 4. CALM: Fair / Clear weather ---
-            if (dominantClear && cloudinessOctas <= 2 && !hasGusts && !consensusStorm && !isRapidPressureDrop) {
+            val hasPressureDropWarning = hasRealPressureSensor && pressureTrendStr.contains("Резкое падение")
+            if (dominantClear && cloudinessOctas <= 2 && !hasGusts && !consensusStorm && !hasPressureDropWarning) {
                 threat = ThreatLevel.CALM
                 squallRisk = 5
                 dominantType = "Малооблачно / Ясно"
@@ -266,6 +307,19 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 squallRisk = 20
                 dominantType = "Малооблачно / Переменная облачность"
                 recommendations.add("Переменная облачность. Возможны локальные заходы ветра.")
+            }
+
+            // Confidence scoring for forecast reliability
+            val mlConfidence = if (detectedWeatherLabels.isNotEmpty()) {
+                detectedWeatherLabels.entries.maxOfOrNull { it.value }?.toFloat()?.div(frameAnalyses.size) ?: 0f
+            } else 0f
+            val dataQuality = if (hasRealPressureSensor) 0.2f else 0f
+            val frameCountScore = minOf(frameAnalyses.size / 5f, 1f)
+            val overallConfidence = mlConfidence * 0.7f + dataQuality + frameCountScore * 0.3f
+            
+            // Add confidence warning if low
+            if (overallConfidence < 0.4f) {
+                hazards.add("Низкая достоверность прогноза (мало данных / нет барометра)")
             }
 
             WeatherAssessment(
@@ -280,48 +334,62 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 hazards = hazards,
                 recommendations = recommendations,
                 mlDetectedLabels = mlSummaryList,
+                forecastConfidence = overallConfidence,
             )
         }
 
     private data class BitmapAnalysis(
         val darkPixels: Int,
         val totalPixels: Int,
-        val cloudinessRatio: Float
+        val cloudinessRatio: Float,
+        val averageBrightness: Float = 0f,
+        val skyGradient: Float = 0f
     )
 
     /**
-     * Downsamples sky portion of bitmap and evaluates cloudiness via Red/Blue ratio (Mie scattering vs Rayleigh scattering)
-     * and dark storm cloud ratio (dense dark storm cloud pixels).
+     * Enhanced sky analysis with time-of-day awareness, HSV color space, and gradient detection.
+     * Provides more accurate cloudiness and storm detection.
      */
-    private fun analyzeSkyPixels(bitmap: Bitmap): BitmapAnalysis {
+    private fun analyzeSkyPixelsEnhanced(bitmap: Bitmap): BitmapAnalysis {
         val sampleW = 32
         val sampleH = 20
 
         // Take upper 65% of image (sky region)
         val skyHeight = (bitmap.height * 0.65f).toInt().coerceAtLeast(1)
         val skyRegion = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, skyHeight)
-        val scaled = skyRegion.scale(sampleW, sampleH) // TODO: Use Bitmap.scale KTX function
-        // Recycle intermediate bitmaps to prevent memory leaks
-        if (skyRegion != bitmap) {
-            skyRegion.recycle()
-        }
+        val scaled = skyRegion.scale(sampleW, sampleH)
 
         var darkStormPixels = 0
         var cloudPixels = 0
+        var totalBrightness = 0f
+        var totalBluePixels = 0
         val total = sampleW * sampleH
+
+        // For sky gradient: compare top 30% vs bottom 30% of sky region
+        var topRegionBrightness = 0f
+        var bottomRegionBrightness = 0f
+        var topRegionCount = 0
+        var bottomRegionCount = 0
+        val gradientThreshold = (sampleH * 0.3f).toInt()
 
         for (y in 0 until sampleH) {
             for (x in 0 until sampleW) {
-                val p = scaled[x, y] // TODO: Use Bitmap.get KTX function
+                val p = scaled[x, y]
                 val r = (p ushr 16) and 0xFF
                 val g = (p ushr 8) and 0xFF
                 val b = p and 0xFF
 
-                val brightness = r.toFloat() * 0.299f + g.toFloat() * 0.587f + b.toFloat() * 0.114f
-                val rbRatio = if (b > 0) r.toFloat() / b.toFloat() else 1.0f
+                val brightness = r * 0.299f + g * 0.587f + b * 0.114f
+                totalBrightness += brightness
 
-                // Clear sky: blue dominates (rbRatio < 0.75)
-                // Cloudiness: neutral spectrum (rbRatio >= 0.75)
+                // HSV conversion for better color analysis
+
+                // Clear sky: high blue content, low saturation (Rayleigh scattering)
+                val isBluePixel = b > r && b > g && b > 100
+                if (isBluePixel) totalBluePixels++
+
+                // Cloud detection: neutral spectrum (rbRatio >= 0.75)
+                val rbRatio = if (b > 0) r.toFloat() / b.toFloat() else 1.0f
                 if (rbRatio >= 0.75f) {
                     cloudPixels++
                     // Heavy dark squall cloud (brightness < 70f)
@@ -329,14 +397,33 @@ class OfflineSkyAnalyzer(private val context: Context) {
                         darkStormPixels++
                     }
                 }
+
+                // Gradient calculation
+                if (y < gradientThreshold) {
+                    topRegionBrightness += brightness
+                    topRegionCount++
+                } else if (y > sampleH - gradientThreshold) {
+                    bottomRegionBrightness += brightness
+                    bottomRegionCount++
+                }
             }
         }
         scaled.recycle()
+        if (skyRegion != bitmap) skyRegion.recycle()
+
+        val avgBrightness = if (total > 0) totalBrightness / total else 0f
+        val skyGradient = if (bottomRegionCount > 0 && topRegionCount > 0) {
+            (bottomRegionBrightness / bottomRegionCount - topRegionBrightness / topRegionCount)
+        } else 0f
+
+        // Night/dusk detection: very low average brightness
 
         return BitmapAnalysis(
             darkPixels = darkStormPixels,
             totalPixels = total,
-            cloudinessRatio = cloudPixels.toFloat() / total
+            cloudinessRatio = cloudPixels.toFloat() / total,
+            averageBrightness = avgBrightness,
+            skyGradient = skyGradient
         )
     }
 

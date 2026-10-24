@@ -1,10 +1,10 @@
 package ru.oldzoomer.yachtapp.data
 
-enum class ThreatLevel(val label: String, val colorCode: String) {
-    CALM("Спокойно", "GREEN"),
-    CAUTION("Внимание: перемена погоды", "YELLOW"),
-    WARNING("Ухудшение погоды", "ORANGE"),
-    DANGER_SQUALL("ОПАСНОСТЬ ШКВАЛА / ШТОРМ", "RED")
+enum class ThreatLevel(val label: String) {
+    CALM("Спокойно"),
+    CAUTION("Внимание: перемена погоды"),
+    WARNING("Ухудшение погоды"),
+    DANGER_SQUALL("ОПАСНОСТЬ ШКВАЛА / ШТОРМ")
 }
 
 data class WeatherAssessment(
@@ -18,5 +18,6 @@ data class WeatherAssessment(
     val estimatedWindKnots: Int,
     val hazards: List<String>,
     val recommendations: List<String>,
-    val mlDetectedLabels: List<String> = emptyList()
+    val mlDetectedLabels: List<String> = emptyList(),
+    val forecastConfidence: Float = 0f // 0-1, confidence score for forecast reliability
 )

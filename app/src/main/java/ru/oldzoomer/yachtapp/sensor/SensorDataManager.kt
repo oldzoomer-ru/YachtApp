@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.callbackFlow
 
 data class SensorReading(
     val azimuthDegrees: Float = 0f,
-    val pressureHpa: Float = 1013.25f,
+    val pressureHpa: Float = 0f,
     val hasPressureSensor: Boolean = false
 )
 
@@ -20,7 +20,7 @@ class SensorDataManager(context: Context) {
 
     val sensorReadings: Flow<SensorReading> = callbackFlow {
         var currentAzimuth = 0f
-        var currentPressure = 1013.25f
+        var currentPressure = 0f
         var hasPressure = false
 
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -60,8 +60,8 @@ class SensorDataManager(context: Context) {
             sensorManager.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
 
-        // Send initial state
-        trySend(SensorReading(currentAzimuth, currentPressure, hasPressure))
+        // Send initial state (only if pressure sensor is available)
+        trySend(SensorReading(currentAzimuth, if (hasPressure) currentPressure else 0f, hasPressure))
 
         awaitClose {
             sensorManager.unregisterListener(listener)
