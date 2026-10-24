@@ -23,11 +23,16 @@ class CaptureViewModel(
     application: Application,
     private val cameraManager: CameraManager,
     private val locationProvider: LocationProvider,
-    private val repository: WeatherRepository
+    private val repository: WeatherRepository,
 ) : AndroidViewModel(application) {
 
     private val sensorDataManager = SensorDataManager(application)
     private val skyAnalyzer = OfflineSkyAnalyzer(application)
+
+    override fun onCleared() {
+        // Release resources to prevent memory leaks
+        cameraManager.release()
+    }
 
     private val _uiState = MutableStateFlow<CaptureUiState>(CaptureUiState.Idle)
     val uiState: StateFlow<CaptureUiState> = _uiState.asStateFlow()
@@ -49,17 +54,14 @@ class CaptureViewModel(
     init {
         viewModelScope.launch {
             sensorDataManager.sensorReadings.collect { reading ->
-                currentAzimuth = reading.azimuthDegrees
-                currentPressure = reading.pressureHpa
-                hasPressure = reading.hasPressureSensor
-
-                val state = _uiState.value
-                if (state is CaptureUiState.Capturing) {
-                    _uiState.value = state.copy(
-                        currentAzimuth = currentAzimuth,
-                        pressureHpa = currentPressure,
-                        hasPressure = hasPressure
-                    )
+                _uiState.value.let { state ->
+                    if (state is CaptureUiState.Capturing) {
+                        _uiState.value = state.copy(
+                            currentAzimuth = reading.azimuthDegrees,
+                            pressureHpa = reading.pressureHpa,
+                            hasPressure = reading.hasPressureSensor,
+                        )
+                    }
                 }
             }
         }
@@ -90,7 +92,7 @@ class CaptureViewModel(
 
     fun captureCurrentStep() {
         val currentState = _uiState.value
-        if (currentState !is CaptureUiState.Capturing && currentState !is CaptureUiState.ReadyForNext) return
+        if ((currentState !is CaptureUiState.Capturing) && (currentState !is CaptureUiState.ReadyForNext)) return
 
         viewModelScope.launch {
             try {

@@ -79,7 +79,7 @@ fun CaptureScreen(
     onBackToStart: () -> Unit,
     onRetry: () -> Unit,
     cameraManager: CameraManager,
-    viewModel: CaptureViewModel
+    viewModel: CaptureViewModel,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedMode by remember { mutableStateOf(viewModel.getDirectionMode()) }
@@ -96,7 +96,7 @@ fun CaptureScreen(
                     onStart = {
                         viewModel.setDirectionMode(selectedMode)
                         onStartObservation()
-                    }
+                    },
                 )
             }
 
@@ -110,7 +110,7 @@ fun CaptureScreen(
                     pressureHpa = state.pressureHpa,
                     hasPressure = state.hasPressure,
                     cameraManager = cameraManager,
-                    onCaptureClick = { viewModel.captureCurrentStep() }
+                    onCaptureClick = { viewModel.captureCurrentStep() },
                 )
             }
 
@@ -118,7 +118,7 @@ fun CaptureScreen(
                 ReadyForNextView(
                     state = state,
                     onNextClick = { viewModel.continueToNextCapture() },
-                    onCancelClick = { viewModel.cancelObservation() }
+                    onCancelClick = { viewModel.cancelObservation() },
                 )
             }
 
@@ -127,7 +127,7 @@ fun CaptureScreen(
                     state = state,
                     onWindChanged = { knots, gusty -> viewModel.updateUserSettings(knots, gusty) },
                     onConfirm = { viewModel.processForecastAndSave() },
-                    onBack = { viewModel.cancelObservation() }
+                    onBack = { viewModel.cancelObservation() },
                 )
             }
 
@@ -378,9 +378,11 @@ fun CapturingView(
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = {
-                        permissionLauncher.launch(android.Manifest.permission.CAMERA)
-                    }) {
+                    Button(
+                        onClick = {
+                            permissionLauncher.launch(android.Manifest.permission.CAMERA)
+                        },
+                    ) {
                         Text("Разрешить доступ к камере")
                     }
                 }
@@ -586,12 +588,12 @@ fun VesselDiagramOverlay(
                 val hullPath = Path().apply {
                     val bw = 20.dp.toPx()
                     val bh = 50.dp.toPx()
-                    val topY = cy - bh / 2f
-                    val bottomY = cy + bh / 2f
+                    val topY = cy - (bh / 2f)
+                    val bottomY = cy + (bh / 2f)
 
                     // Pointed bow at top
                     moveTo(cx, topY)
-                    cubicTo(cx + bw, topY + bh * 0.3f, cx + bw, bottomY - bh * 0.1f, cx + bw * 0.7f, bottomY)
+                    cubicTo(cx + bw, (topY + bh * 0.3f), cx + bw, (bottomY - bh * 0.1f), cx + bw * 0.7f, bottomY)
                     lineTo(cx - bw * 0.7f, bottomY)
                     cubicTo(cx - bw, bottomY - bh * 0.1f, cx - bw, topY + bh * 0.3f, cx, topY)
                     close()
@@ -650,8 +652,9 @@ fun VesselDiagramOverlay(
                 }
 
                 if (direction == Direction.TRUE_WINDWARD) {
-                    // Step 5: Highlight wind arrow straight down into bow
-                    drawArrow(0f, isActive = true)
+                    // Step 5: Highlight wind arrow pointing UP (toward bow, against wind direction)
+                    // 180° = arrow points down (toward wind source, which is what we want for "into the wind")
+                    drawArrow(180f, isActive = true)
                 } else if (isDiagonal) {
                     // Option B: 45°, 135°, 225°, 315°
                     drawArrow(45f, isActive = direction == Direction.CLOSE_HAULED_STBD)

@@ -1,5 +1,6 @@
 package ru.oldzoomer.yachtapp
 
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -35,6 +36,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var requestPermissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
 
+    @SuppressLint("InvalidFragmentVersionForActivityResult")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -43,7 +45,10 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestMultiplePermissions()
         ) { _ -> }
 
-        requestAppPermissions()
+        // Defer permission request to after onCreate to avoid context issues
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            requestAppPermissions()
+        }
 
         setContent {
             YachtAppTheme {

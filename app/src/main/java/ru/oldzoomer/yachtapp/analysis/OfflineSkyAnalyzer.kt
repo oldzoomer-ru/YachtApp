@@ -11,6 +11,8 @@ import kotlinx.coroutines.withContext
 import ru.oldzoomer.yachtapp.data.Observation
 import ru.oldzoomer.yachtapp.data.ThreatLevel
 import ru.oldzoomer.yachtapp.data.WeatherAssessment
+import androidx.core.graphics.scale
+import androidx.core.graphics.get
 
 class OfflineSkyAnalyzer(private val context: Context) {
 
@@ -45,16 +47,16 @@ class OfflineSkyAnalyzer(private val context: Context) {
                     estimatedWindKnots = 10,
                     hazards = emptyList(),
                     recommendations = listOf("Погода стабильна. Приятного плавания!"),
-                    mlDetectedLabels = emptyList()
+                    mlDetectedLabels = emptyList(),
                 )
             }
 
             // --- 1. Barometric Pressure Trend Calculation ---
-            val sortedObs = observations.sortedBy { it.timestamp }
+            val sortedObs = observations.sortedBy { obs -> obs.timestamp }
             val currentPressure = sortedObs.last().pressureHpa
             val oldestPressure = sortedObs.first().pressureHpa
 
-            val avgWind = observations.map { it.userWindKnots }.average().toInt()
+            val avgWind = observations.asSequence().map { it.userWindKnots }.average().toInt()
             val hasGusts = observations.any { it.userIsGusty }
 
             // Difference in hours (minimum 0.5h to prevent division spikes when photos are taken quickly)
@@ -81,7 +83,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 val stormSignal: Boolean,
                 val cloudSignal: Boolean,
                 val clearSignal: Boolean,
-                val skyCoverageEstimate: Int // 0-8 octas from this single frame
+                val skyCoverageEstimate: Int, // 0-8 octas from this single frame
             )
 
             val frameAnalyses = mutableListOf<FrameAnalysis>()
@@ -106,7 +108,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
                             detectedWeatherLabels[weatherResult.label] = detectedWeatherLabels.getOrDefault(weatherResult.label, 0) + 1
 
                             // High confidence storm signal (> 75%)
-                            if (weatherResult.label in stormLabels && weatherResult.confidence > 0.75f) {
+                            if ((weatherResult.label in stormLabels) && (weatherResult.confidence > 0.75f)) {
                                 highConfidenceStormSignal = true
                             }
                         }
@@ -120,24 +122,26 @@ class OfflineSkyAnalyzer(private val context: Context) {
                         }
 
                         // 3. Per-frame signal classification
-                        val frameStormSignal = weatherLabel != null && weatherLabel in stormLabels
-                        val frameCloudSignal = weatherLabel != null && weatherLabel in cloudLabels
-                        val frameClearSignal = weatherLabel != null && weatherLabel in clearLabels
+                        val frameStormSignal = (weatherLabel != null) && (weatherLabel in stormLabels)
+                        val frameCloudSignal = (weatherLabel != null) && (weatherLabel in cloudLabels)
+                        val frameClearSignal = (weatherLabel != null) && (weatherLabel in clearLabels)
 
                         // Estimate cloudiness octas from this single frame
                         val frameCloudOctas = (bitmapAnalysis.cloudinessRatio * 8).toInt().coerceIn(0, 8)
                         // Boost if ML confirms clouds but pixel ratio doesn't fully show it
-                        val adjustedCloudOctas = if (frameCloudSignal && frameCloudOctas < 3) 4 else frameCloudOctas
+                        val adjustedCloudOctas = if ((frameCloudSignal) && (frameCloudOctas < 3)) 4 else frameCloudOctas
 
-                        frameAnalyses.add(FrameAnalysis(
+                        frameAnalyses.add(
+                            FrameAnalysis(
                             darkRatio = bitmapAnalysis.darkPixels.toFloat() / maxOf(bitmapAnalysis.totalPixels, 1),
                             cloudinessRatio = bitmapAnalysis.cloudinessRatio,
                             weatherLabel = weatherLabel,
                             stormSignal = frameStormSignal,
                             cloudSignal = frameCloudSignal,
                             clearSignal = frameClearSignal,
-                            skyCoverageEstimate = adjustedCloudOctas
-                        ))
+                            skyCoverageEstimate = adjustedCloudOctas,
+                        ),
+                    )
 
                         bitmap.recycle()
                     }
@@ -147,10 +151,11 @@ class OfflineSkyAnalyzer(private val context: Context) {
             }
 
             // Format ML labels summary sorted by frequency
-            val mlSummaryList = detectedWeatherLabels.entries
-                .sortedByDescending { it.value }
+            val mlSummaryList = detectedWeatherLabels.entries.asSequence()
+                .sortedByDescending { entry -> entry.value }
                 .take(6)
-                .map { "${it.key} (${it.value} ракурс)" }
+                .map { entry -> "${entry.key} (${entry.value} ракурс)" }
+                .toList()
 
             // ==========================================
             // CONSENSUS-BASED DECISION ENGINE & THREAT MATRIX
@@ -169,7 +174,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
 
             // Average dark ratio across all frames
             val avgDarkRatio = if (frameAnalyses.isNotEmpty()) {
-                frameAnalyses.map { it.darkRatio }.average().toFloat()
+                frameAnalyses.asSequence().map { it.darkRatio }.average().toFloat()
             } else 0f
 
             val overallDarkRatio = if (totalSampledPixels > 0) totalDarkPixels.toFloat() / totalSampledPixels else 0f
@@ -274,7 +279,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
                 estimatedWindKnots = avgWind,
                 hazards = hazards,
                 recommendations = recommendations,
-                mlDetectedLabels = mlSummaryList
+                mlDetectedLabels = mlSummaryList,
             )
         }
 
@@ -295,7 +300,8 @@ class OfflineSkyAnalyzer(private val context: Context) {
         // Take upper 65% of image (sky region)
         val skyHeight = (bitmap.height * 0.65f).toInt().coerceAtLeast(1)
         val skyRegion = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, skyHeight)
-        val scaled = Bitmap.createScaledBitmap(skyRegion, sampleW, sampleH, true)
+        val scaled = skyRegion.scale(sampleW, sampleH) // TODO: Use Bitmap.scale KTX function
+        // Recycle intermediate bitmaps to prevent memory leaks
         if (skyRegion != bitmap) {
             skyRegion.recycle()
         }
@@ -306,7 +312,7 @@ class OfflineSkyAnalyzer(private val context: Context) {
 
         for (y in 0 until sampleH) {
             for (x in 0 until sampleW) {
-                val p = scaled.getPixel(x, y)
+                val p = scaled[x, y] // TODO: Use Bitmap.get KTX function
                 val r = (p ushr 16) and 0xFF
                 val g = (p ushr 8) and 0xFF
                 val b = p and 0xFF
@@ -334,11 +340,17 @@ class OfflineSkyAnalyzer(private val context: Context) {
         )
     }
 
-    private fun loadDownsampledBitmapFromUri(uri: Uri, maxDimension: Int): Bitmap? {
+    private fun loadDownsampledBitmapFromUri(uri: Uri, maxDimension: Int = 800): Bitmap? {
         return try {
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, options)
+            }
+
+            // Validate that bounds were successfully read
+            if (options.outWidth <= 0 || options.outHeight <= 0) {
+                Log.w("OfflineSkyAnalyzer", "Invalid bitmap bounds from $uri")
+                return null
             }
 
             var inSampleSize = 1
@@ -355,7 +367,12 @@ class OfflineSkyAnalyzer(private val context: Context) {
             }
 
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, decodeOptions)
+                val bitmap = BitmapFactory.decodeStream(stream, null, decodeOptions)
+                // Ensure bitmap was successfully decoded
+                if (bitmap == null) {
+                    Log.w("OfflineSkyAnalyzer", "decodeStream returned null for $uri")
+                }
+                bitmap
             }
         } catch (e: Exception) {
             Log.e("OfflineSkyAnalyzer", "Failed to load downsampled bitmap from $uri", e)
