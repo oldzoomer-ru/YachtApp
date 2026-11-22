@@ -3,12 +3,18 @@ name: Android CI
 on:
   push:
     branches: [ "master" ]
+    # 1. Добавляем запуск при пуше тегов вида v1.0.0
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "master" ]
 
+# 2. Даем права на создание релизов и загрузку файлов
+permissions:
+  contents: write
+
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -22,5 +28,16 @@ jobs:
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
+      
     - name: Build with Gradle
       run: ./gradlew build
+
+    # 3. Шаг публикации в GitHub Releases
+    - name: Create GitHub Release
+      # Выполняется только если запушен тег (например, git tag v1.0.0 && git push --tags)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        # Укажите правильный путь к вашему APK или AAB файлу
+        files: app/build/outputs/apk/debug/app-debug.apk
+        generate_release_notes: true
