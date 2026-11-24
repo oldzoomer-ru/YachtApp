@@ -1,5 +1,7 @@
 # YachtApp
 
+[*Скачать .apk*](https://release-assets.githubusercontent.com/github-production-release-asset/1430197796/35e1a4f2-1ebe-409a-8872-cd8e475d8cd7?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-11-24T18%3A08%3A08Z&rscd=attachment%3B+filename%3Dapp-debug.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-11-24T17%3A07%3A24Z&ske=2026-11-24T18%3A08%3A08Z&sks=b&skv=2018-11-09&sig=UklH7cvMlf5Him7m0oQtVLUfAfh2EIqxB1c6tYZhMCE%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc5NTU0MjcyNywibmJmIjoxNzk1NTQwOTI3LCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.8iveZgaRln-MhftflmW4lothgnYQY1bc2mUBVrXIAes&response-content-disposition=attachment%3B%20filename%3Dapp-debug.apk&response-content-type=application%2Fvnd.android.package-archive)
+
 **YachtApp** — Android-приложение для яхтсменов, предназначенное для фиксации морских погодных наблюдений и автоматической оценки штормовой/шквальной опасности в автономном режиме (без доступа к сети Интернет) на основе фотографий неба, физических датчиков смартфона и GPS.
 
 ---
